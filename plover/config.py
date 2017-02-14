@@ -6,7 +6,6 @@
 import os
 import json
 import codecs
-import shutil
 
 # Python 2/3 compatibility.
 from six import BytesIO
@@ -14,10 +13,9 @@ from six.moves import configparser
 
 from plover.exception import InvalidConfigurationError
 from plover.machine.keymap import Keymap
-from plover.machine.registry import machine_registry, NoSuchMachineException
+from plover.registry import registry
 from plover.oslayer.config import ASSETS_DIR, CONFIG_DIR
 from plover.misc import expand_path, shorten_path
-from plover import system
 from plover import log
 
 
@@ -33,12 +31,8 @@ DEFAULT_MACHINE_TYPE = 'Keyboard'
 MACHINE_AUTO_START_OPTION = 'auto_start'
 DEFAULT_MACHINE_AUTO_START = False
 
-DEFAULT_DICTIONARIES = ['main.json',
-                        'commands.json',
-                        'user.json']
-
-DICTIONARY_CONFIG_SECTION = 'Dictionary Configuration'
-DICTIONARY_FILE_OPTION = 'dictionary_file'
+LEGACY_DICTIONARY_CONFIG_SECTION = 'Dictionary Configuration'
+LEGACY_DICTIONARY_FILE_OPTION = 'dictionary_file'
 
 LOGGING_CONFIG_SECTION = 'Logging Configuration'
 LOG_FILE_OPTION = 'log_file'
@@ -81,13 +75,16 @@ TRANSLATION_FRAME_SECTION = 'Translation Frame'
 TRANSLATION_FRAME_OPACITY_OPTION = 'opacity'
 DEFAULT_TRANSLATION_FRAME_OPACITY = 100
 
-DEFAULT_SYSTEM = 'English Stenotype'
+BASE_SYSTEM_SECTION = 'System'
+SYSTEM_NAME_OPTION = 'name'
+DEFAULT_SYSTEM_NAME = 'English Stenotype'
+
 SYSTEM_CONFIG_SECTION = 'System: %s'
 SYSTEM_KEYMAP_OPTION = 'keymap[%s]'
+SYSTEM_DICTIONARIES_OPTION = 'dictionaries'
 
-# Dictionary constants.
-JSON_EXTENSION = '.json'
-RTF_EXTENSION = '.rtf'
+PLUGINS_CONFIG_SECTION = 'Plugins'
+ENABLED_EXTENSIONS_OPTION = 'enabled_extensions'
 
 # Logging constants.
 LOG_EXTENSION = '.log'
@@ -149,9 +146,10 @@ class Config(object):
                                  None)
         if machine_type is not None:
             try:
-                machine_registry.get(machine_type)
-            except NoSuchMachineException:
-                log.error("invalid machine type: %s", machine_type)
+                machine_type = registry.get_plugin('machine', machine_type).name
+            except:
+                log.error("invalid machine type: %s",
+                          machine_type, exc_info=True)
                 self.set_machine_type(DEFAULT_MACHINE_TYPE)
                 machine_type = None
         if machine_type is None:
@@ -171,8 +169,8 @@ class Config(object):
                 return p[1](v)
             except ValueError:
                 return p[0]
-        machine = machine_registry.get(machine_type)
-        info = machine.get_option_info()
+        machine_class = registry.get_plugin('machine', machine_type).resolve()
+        info = machine_class.get_option_info()
         defaults = {k: v[0] for k, v in info.items()}
         if self._config.has_section(machine_type):
             options = {o: self._config.get(machine_type, o)
@@ -183,22 +181,58 @@ class Config(object):
         return defaults
 
     def set_dictionary_file_names(self, filenames):
-        self._update(DICTIONARY_CONFIG_SECTION, (
-            (DICTIONARY_FILE_OPTION + str(n), shorten_path(path))
-            for n, path in enumerate(filenames, start=1)
-        ))
+        system_name = self.get_system_name()
+        section = SYSTEM_CONFIG_SECTION % system_name
+        option = SYSTEM_DICTIONARIES_OPTION
+        if filenames is None:
+            self._config.remove_option(section, option)
+        else:
+            self._set(section, option, json.dumps(
+                list(shorten_path(path) for path in filenames)
+            ))
 
     def get_dictionary_file_names(self):
-        filenames = []
-        if self._config.has_section(DICTIONARY_CONFIG_SECTION):
-            options = [x for x in self._config.options(DICTIONARY_CONFIG_SECTION)
-                       if x.startswith(DICTIONARY_FILE_OPTION)]
-            options.sort(key=_dict_entry_key)
-            filenames = [self._config.get(DICTIONARY_CONFIG_SECTION, o)
-                         for o in options]
+        system_name = self.get_system_name()
+        try:
+            system = registry.get_plugin('system', system_name).resolve()
+        except:
+            log.error("invalid system name: %s", system_name, exc_info=True)
+            return []
+        section = SYSTEM_CONFIG_SECTION % system_name
+        option = SYSTEM_DICTIONARIES_OPTION
+        filenames = self._get(section, option, None)
+        if filenames is None:
+            filenames = self._legacy_get_dictionary_file_names()
+            if filenames is None:
+                filenames = system.DEFAULT_DICTIONARIES
+        else:
+            try:
+                filenames = tuple(json.loads(filenames))
+            except ValueError as e:
+                log.error("invalid system dictionaries, resetting to default",
+                          exc_info=True)
+                self.set_dictionary_file_names(None)
+                filenames = system.DEFAULT_DICTIONARIES
+        return [expand_path(path) for path in filenames]
+
+    def _legacy_get_dictionary_file_names(self):
+        if not self._config.has_section(LEGACY_DICTIONARY_CONFIG_SECTION):
+            return None
+        def _dict_entry_key(s):
+            try:
+                return int(s[len(LEGACY_DICTIONARY_FILE_OPTION):])
+            except ValueError:
+                return -1
+        options = [x for x in self._config.options(LEGACY_DICTIONARY_CONFIG_SECTION)
+                   if x.startswith(LEGACY_DICTIONARY_FILE_OPTION)]
+        options.sort(key=_dict_entry_key)
+        filenames = [self._config.get(LEGACY_DICTIONARY_CONFIG_SECTION, o)
+                     for o in options]
+        # Update to new format.
+        self._config.remove_section(LEGACY_DICTIONARY_CONFIG_SECTION)
         if not filenames:
-            filenames = DEFAULT_DICTIONARIES
-        filenames = [expand_path(path) for path in filenames]
+            return None
+        self.set_dictionary_file_names(filenames)
         return filenames
 
     def set_log_file_name(self, filename):
@@ -331,25 +365,57 @@ class Config(object):
             opacity = DEFAULT_TRANSLATION_FRAME_OPACITY
         return opacity
 
-    def set_system_keymap(self, keymap, machine_type=None):
+    def set_system_name(self, system_name):
+        self._set(BASE_SYSTEM_SECTION, SYSTEM_NAME_OPTION, system_name)
+
+    def get_system_name(self):
+        system_name = self._get(BASE_SYSTEM_SECTION,
+                                SYSTEM_NAME_OPTION,
+                                None)
+        if system_name is not None:
+            try:
+                system_name = registry.get_plugin('system', system_name).name
+            except:
+                log.error("invalid system name: %s",
+                          system_name, exc_info=True)
+                self.set_system_name(DEFAULT_SYSTEM_NAME)
+                system_name = None
+        if system_name is None:
+            system_name = DEFAULT_SYSTEM_NAME
+        return system_name
+
+    def set_system_keymap(self, keymap, machine_type=None, system_name=None):
         if machine_type is None:
             machine_type = self.get_machine_type()
-        section = SYSTEM_CONFIG_SECTION % DEFAULT_SYSTEM
+        if system_name is None:
+            system_name = self.get_system_name()
+        section = SYSTEM_CONFIG_SECTION % system_name
         option = SYSTEM_KEYMAP_OPTION % machine_type
-        self._set(section, option, json.dumps(sorted(dict(keymap).items())))
+        if keymap is None:
+            self._config.remove_option(section, option)
+        else:
+            self._set(section, option, json.dumps(sorted(dict(keymap).items())))
 
-    def get_system_keymap(self, machine_type=None):
+    def get_system_keymap(self, machine_type=None, system_name=None):
         if machine_type is None:
             machine_type = self.get_machine_type()
         try:
-            machine_class = machine_registry.get(machine_type)
+            machine_class = registry.get_plugin('machine', machine_type).resolve()
         except:
             log.error("invalid machine type: %s", machine_type, exc_info=True)
             return None
-        section = SYSTEM_CONFIG_SECTION % DEFAULT_SYSTEM
+        if system_name is None:
+            system_name = self.get_system_name()
+        try:
+            system = registry.get_plugin('system', system_name).resolve()
+        except:
+            log.error("invalid system name: %s", system_name, exc_info=True)
+            return None
+        section = SYSTEM_CONFIG_SECTION % system_name
         option = SYSTEM_KEYMAP_OPTION % machine_type
         mappings = self._get(section, option, None)
         if mappings is None:
+            # No user mappings, use system default.
             mappings = system.KEYMAPS.get(machine_type)
         else:
             try:
@@ -357,11 +423,43 @@ class Config(object):
             except ValueError as e:
                 log.error("invalid machine keymap, resetting to default",
                           exc_info=True)
+                self.set_system_keymap(None, machine_type)
                 mappings = system.KEYMAPS.get(machine_type)
-                self.set_system_keymap(mappings, machine_type)
+        if mappings is None:
+            if machine_class.KEYMAP_MACHINE_TYPE is not None:
+                # Try fallback.
+                return self.get_system_keymap(
+                    machine_type=machine_class.KEYMAP_MACHINE_TYPE,
+                    system_name=system_name
+                )
+            # No fallback...
+            mappings = {}
         keymap = Keymap(machine_class.get_keys(), system.KEYS + machine_class.get_actions())
         keymap.set_mappings(mappings)
         return keymap
+
+    def set_enabled_extensions(self, extensions):
+        if extensions is None:
+            self._config.remove_option(PLUGINS_CONFIG_SECTION,
+                                       ENABLED_EXTENSIONS_OPTION)
+        else:
+            self._set(PLUGINS_CONFIG_SECTION,
+                      ENABLED_EXTENSIONS_OPTION,
+                      json.dumps(sorted(list(set(extensions)))))
+
+    def get_enabled_extensions(self):
+        extensions = ()
+        value = self._get(PLUGINS_CONFIG_SECTION,
+                          ENABLED_EXTENSIONS_OPTION,
+                          None)
+        if value is not None:
+            try:
+                extensions = set(json.loads(value))
+            except ValueError:
+                log.error("invalid enabled extensions set, resetting to default",
+                          exc_info=True)
+                self.set_enabled_extensions(None)
+        return set(extensions)
 
     def _set(self, section, option, value):
         if not self._config.has_section(section):
@@ -413,6 +511,8 @@ class Config(object):
 
     dictionary_file_names
 
+    enabled_extensions
+
     enable_stroke_logging
     enable_translation_logging
     log_file_name
@@ -424,6 +524,7 @@ class Config(object):
     suggestions_display_on_top
     translation_frame_opacity
 
+    system_name
     machine_type
     machine_specific_options
     system_keymap
@@ -443,28 +544,3 @@ class Config(object):
                 continue
             setter = getattr(self, 'set_%s' % option)
             setter(kwargs[option])
-
-
-def _dict_entry_key(s):
-    try:
-        return int(s[len(DICTIONARY_FILE_OPTION):])
-    except ValueError:
-        return -1
-
-
-def copy_default_dictionaries(config):
-    '''Copy default dictionaries to the configuration directory.
-
-    Each default dictionary is copied to the configuration directory
-    if it's in use by the current config and missing.
-    '''
-
-    config_dictionaries = set(os.path.basename(dictionary) for dictionary
-                              in config.get_dictionary_file_names())
-    for dictionary in config_dictionaries & set(DEFAULT_DICTIONARIES):
-        dst = os.path.join(CONFIG_DIR, dictionary)
-        if os.path.exists(dst):
-            continue
-        src = os.path.join(ASSETS_DIR, dictionary)
-        log.info('copying %s to %s', src, dst)
-        shutil.copy(src, dst)

@@ -93,17 +93,27 @@ class Formatter(object):
         rendered translations. If there is no context then this may be None.
 
         """
-        prev_formatting = prev.formatting if prev else None
 
+        last_formatting = prev[-1].formatting if prev else None
         for t in do:
-            last_action = self._get_last_action(prev.formatting if prev else None)
+            last_action = self._get_last_action(last_formatting)
             if t.english:
                 t.formatting = _translation_to_actions(t.english, last_action,
                                                        self.spaces_after)
             else:
                 t.formatting = _raw_to_actions(t.rtfcre[0], last_action,
                                                self.spaces_after)
-            prev = t
+            last_formatting = t.formatting
+
+        if prev:
+            num_previous = 1
+            if do:
+                # Worst case scenario: replacing fingerspelled content.
+                first_formatting = do[0].formatting
+                num_previous = max(num_previous, len(first_formatting[0].replace))
+            prev_formatting = [a for t in prev[-num_previous:] for a in t.formatting]
+        else:
+            prev_formatting = []
 
         old = [a for t in undo for a in t.formatting]
         new = [a for t in do for a in t.formatting]
@@ -156,11 +166,7 @@ class OutputHelper(object):
         for a in action_list:
             if a.replace and text.endswith(a.replace):
                 text = text[:-len(a.replace)]
-            # With numbers, it's possible to have a.text='2' with a.word='1.2'
-            # folowing by an action that replaces '1.2' by '$1.20'...
-            if len(a.word) > len(a.text) and a.word.endswith(text):
-                text = a.word
-            else:
+            if a.text:
                 text += a.text
         return text
 
@@ -654,6 +660,10 @@ def _atom_to_action_spaces_after(atom, last_action):
                 action.replace = NO_SPACE
         elif meta == META_CAPITALIZE:
             action = last_action.copy_state()
+            if was_space:
+                # Persist space state
+                action.replace = SPACE
+                action.text = SPACE
             action.capitalize = True
             action.lower = False
         elif meta == META_LOWER:
@@ -809,7 +819,7 @@ def _apply_mode(text, case, space_char, begin, last_attach,
     # Title case is sensitive to lower flag
     if last_lower and len(text) > 0:  # Check for text
         if case is _Action.CASE_TITLE:
-            text = _lower(text)
+            text = _lower_nowhitespace(text)
 
     return text
 
@@ -978,30 +988,16 @@ def _lower(s):
 
 def _capitalize_nowhitespace(s):
     """Capitalize the first letter of s (ignoring spaces)."""
-    word_list = s.split(' ')
-    final_list = []
-    first_word = True
-    for word in word_list:
-        if len(word) > 0:
-            if first_word is True:
-                word = word[0:1].upper() + word[1:]
-                first_word = False
-        final_list.append(word)
-    return ' '.join(final_list)
+    s_no_space = s.lstrip(' ')
+    spaces = ' ' * (len(s) - len(s_no_space))
+    return spaces + s_no_space[:1].upper() + s_no_space[1:]
 
 
 def _lower_nowhitespace(s):
     """Lowercase the first letter of s (ignoring spaces)."""
-    word_list = s.split(' ')
-    final_list = []
-    first_word = True
-    for word in word_list:
-        if len(word) > 0:
-            if first_word is True:
-                word = word[0:1].lower() + word[1:]
-                first_word = False
-        final_list.append(word)
-    return ' '.join(final_list)
+    s_no_space = s.lstrip(' ')
+    spaces = ' ' * (len(s) - len(s_no_space))
+    return spaces + s_no_space[:1].lower() + s_no_space[1:]
 
 
 def _upper(s):

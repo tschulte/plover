@@ -237,5 +237,5 @@ KEYMAPS = {
     },
 }
 
-KEYMAPS['ProCAT'] = KEYMAPS['TX Bolt']
-
+DICTIONARIES_ROOT = 'asset:plover:assets'
+DEFAULT_DICTIONARIES = ('main.json', 'commands.json', 'user.json')

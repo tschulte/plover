@@ -1,17 +1,19 @@
 
 from collections import namedtuple
 from functools import wraps
+import os
+import shutil
 import threading
 
 # Python 2/3 compatibility.
 from six.moves.queue import Queue
 
-from plover import log
-from plover.config import copy_default_dictionaries
+from plover import log, system
 from plover.dictionary.loading_manager import DictionaryLoadingManager
 from plover.exception import InvalidConfigurationError
 from plover.formatting import Formatter
-from plover.machine.registry import machine_registry, NoSuchMachineException
+from plover.registry import registry, PLUGINS_DIR
+from plover.resource import ASSET_SCHEME, resource_filename
 from plover.steno import Stroke
 from plover.suggestions import Suggestions
 from plover.translation import Translator
@@ -20,6 +22,31 @@ from plover.translation import Translator
 StartingStrokeState = namedtuple('StartingStrokeState', 'attach capitalize')
 
 MachineParams = namedtuple('MachineParams', 'type options keymap')
+
+
+def copy_default_dictionaries(dictionaries_files):
+    '''Recreate default dictionaries.
+
+    Each default dictionary is recreated if it's
+    in use by the current config and missing.
+    '''
+
+    config_dictionaries = set(os.path.basename(dictionary)
+                              for dictionary in dictionaries_files)
+    for dictionary in dictionaries_files:
+        # Ignore assets.
+        if dictionary.startswith(ASSET_SCHEME):
+            continue
+        # Nothing to do if dictionary file already exists.
+        if os.path.exists(dictionary):
+            continue
+        # Check it's actually a default dictionary.
+        basename = os.path.basename(dictionary)
+        if not basename in system.DEFAULT_DICTIONARIES:
+            continue
+        default_dictionary = os.path.join(system.DICTIONARIES_ROOT, basename)
+        log.info('recreating %s from %s', dictionary, default_dictionary)
+        shutil.copyfile(resource_filename(default_dictionary), dictionary)
 
 
 def with_lock(func):
@@ -69,6 +96,7 @@ class StenoEngine(object):
         self._suggestions = Suggestions(self._dictionaries)
         self._keyboard_emulation = keyboard_emulation
         self._hooks = { hook: [] for hook in self.HOOKS }
+        self._running_extensions = {}
 
     def __enter__(self):
         self._lock.__enter__()
@@ -97,13 +125,13 @@ class StenoEngine(object):
                 log.error('engine %s failed', func.__name__[1:], exc_info=True)
 
     def _stop(self):
+        self._stop_extensions(self._running_extensions.keys())
         if self._machine is not None:
             self._machine.stop_capture()
             self._machine = None
 
     def _start(self):
         self._set_output(self._config.get_auto_start())
-        copy_default_dictionaries(self._config)
         self._update(full=True)
 
     def _update(self, config_update=None, full=False, reset_machine=False):
@@ -138,6 +166,11 @@ class StenoEngine(object):
         self._formatter.start_attached = config['start_attached']
         self._formatter.start_capitalized = config['start_capitalized']
         self._translator.set_min_undo_length(config['undo_levels'])
+        # Update system.
+        system_name = config['system_name']
+        if system.NAME != system_name:
+            log.info('loading system: %s', system_name)
+            system.setup(system_name)
         # Update machine.
         update_keymap = False
         start_machine = False
@@ -151,9 +184,10 @@ class StenoEngine(object):
             machine_type = config['machine_type']
             machine_options = config['machine_specific_options']
             try:
-                machine_class = machine_registry.get(machine_type)
-            except NoSuchMachineException as e:
+                machine_class = registry.get_plugin('machine', machine_type).resolve()
+            except Exception as e:
                 raise InvalidConfigurationError(str(e))
+            log.info('setting machine: %s', machine_type)
             self._machine = machine_class(machine_options)
             self._machine.set_suppression(self._is_running)
             self._machine.add_state_callback(self._machine_state_callback)
@@ -171,11 +205,35 @@ class StenoEngine(object):
             self._machine.start_capture()
         # Update dictionaries.
         dictionaries_files = config['dictionary_file_names']
+        copy_default_dictionaries(dictionaries_files)
         dictionaries = self._dictionaries_manager.load(dictionaries_files)
         self._dictionaries.set_dicts(dictionaries)
+        # Update running extensions.
+        enabled_extensions = config['enabled_extensions']
+        running_extensons = set(self._running_extensions)
+        self._stop_extensions(running_extensons - enabled_extensions)
+        self._start_extensions(enabled_extensions - running_extensons)
         # Trigger `config_changed` hook.
         if config_update:
             self._trigger_hook('config_changed', config_update)
+
+    def _start_extensions(self, extension_list):
+        for extension_name in extension_list:
+            log.info('starting `%s` extension' % extension_name)
+            try:
+                extension = registry.get_plugin('extension', extension_name).resolve()(self)
+                extension.start()
+            except Exception:
+                log.error('initializing extension `%s` failed', extension_name, exc_info=True)
+            else:
+                self._running_extensions[extension_name] = extension
+
+    def _stop_extensions(self, extension_list):
+        for extension_name in list(extension_list):
+            log.info('stopping `%s` extension' % extension_name)
+            extension = self._running_extensions.pop(extension_name)
+            extension.stop()
+            del extension
 
     def _quit(self):
         self._stop()
@@ -233,6 +291,10 @@ class StenoEngine(object):
             self._trigger_hook('add_translation')
         elif command == 'LOOKUP':
             self._trigger_hook('lookup')
+        else:
+            command_args = command.split(':', 2)
+            command_fn = registry.get_plugin('command', command_args[0]).resolve()
+            command_fn(self, command_args[1] if len(command_args) == 2 else '')
         return False
 
     def _on_stroked(self, steno_keys):
@@ -296,7 +358,6 @@ class StenoEngine(object):
         return self._config.as_dict()
 
     @config.setter
-    @with_lock
     def config(self, update):
         self._same_thread_hook(self._update, config_update=update)
 
@@ -319,18 +380,17 @@ class StenoEngine(object):
     def quit(self):
         self._same_thread_hook(self._quit)
 
-    @property
     @with_lock
-    def machines(self):
-        return sorted(machine_registry.get_all_names())
+    def list_plugins(self, plugin_type):
+        return sorted(registry.list_plugins(plugin_type))
 
     @with_lock
     def machine_specific_options(self, machine_type):
         return self._config.get_machine_specific_options(machine_type)
 
     @with_lock
-    def system_keymap(self, machine_type):
-        return self._config.get_system_keymap(machine_type)
+    def system_keymap(self, machine_type, system_name):
+        return self._config.get_system_keymap(machine_type, system_name)
 
     @with_lock
     def lookup(self, translation):

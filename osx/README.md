@@ -4,6 +4,8 @@
 
 With Homebrew installed, you should be able to have everything setup automatically by using: `./bootstrap.sh`.
 
+At the moment, we need to overwrite the Python formula to get Python 3.5, as 3.6 [breaks the build process](https://github.com/pyinstaller/pyinstaller/issues/2331).
+
 Note: you can use `./bootstrap.sh -n` to get a list of the commands that would be run.
 
 ## Manual development environment setup
@@ -39,7 +41,7 @@ After each build, you need to approve Plover as an Assistive Device:
 
 Now you can run the app by double-clicking on it or by using open(1):
 
-`open dist/Plover.app`
+`open dist/plover.app`
 
 ### Dev Workaround: run as `root`
 

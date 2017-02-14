@@ -6,27 +6,31 @@ from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (
     QFileDialog,
     QFontDialog,
-    QDialog,
     QMessageBox,
 )
 
 from plover import system
 
 from plover.gui_qt.paper_tape_ui import Ui_PaperTape
-from plover.gui_qt.utils import ToolBar, WindowState
+from plover.gui_qt.tool import Tool
+from plover.gui_qt.utils import ToolBar
 
 
-class PaperTape(QDialog, Ui_PaperTape, WindowState):
+class PaperTape(Tool, Ui_PaperTape):
 
+    ''' Paper tape display of strokes. '''
+
+    TITLE = _('Paper Tape')
+    ICON = ':/tape.svg'
     ROLE = 'paper_tape'
+    SHORTCUT = 'Ctrl+T'
 
     STYLE_PAPER, STYLE_RAW = (_('Paper'), _('Raw'))
     STYLES = (STYLE_PAPER, STYLE_RAW)
 
     def __init__(self, engine):
-        super(PaperTape, self).__init__()
+        super(PaperTape, self).__init__(engine)
         self.setupUi(self)
-        self._engine = engine
         self._strokes = []
         self._all_keys = None
         self._formatter = None
@@ -41,37 +45,39 @@ class PaperTape(QDialog, Ui_PaperTape, WindowState):
         ))
         self.action_Clear.setEnabled(False)
         self.action_Save.setEnabled(False)
-        self._setup_system(engine.config)
+        engine.signal_connect('config_changed', self.on_config_changed)
+        self.on_config_changed(engine.config)
         engine.signal_connect('stroked', self.on_stroke)
         self.tape.setFocus()
         self.restore_state()
         self.finished.connect(self.save_state)
 
     def _restore_state(self, settings):
+        style = settings.value('style')
+        if style is not None:
+            self.styles.setCurrentText(self.STYLES[int(style)])
         font_string = settings.value('font')
-        if font_string is None:
-            return
-        font = QFont()
-        if not font.fromString(font_string):
-            return
-        self.header.setFont(font)
-        self.tape.setFont(font)
+        if font_string is not None:
+            font = QFont()
+            if font.fromString(font_string):
+                self.header.setFont(font)
+                self.tape.setFont(font)
 
     def _save_state(self, settings):
-        font_string = self.header.font().toString()
-        settings.setValue('font', font_string)
+        settings.setValue('style', self.STYLES.index(self._style))
+        settings.setValue('font', self.header.font().toString())
 
-    def _setup_system(self, config):
+    def on_config_changed(self, config):
         if 'stroke_display_on_top' in config:
             ontop = config['stroke_display_on_top']
             self.action_ToggleOnTop.setChecked(ontop)
             self.on_toggle_ontop(ontop)
-        self._all_keys = ''.join(key.strip('-') for key in system.KEYS)
-        self._numbers = set(system.NUMBERS.values())
-        self.header.setText(self._all_keys)
-        style = self.STYLE_PAPER
-        self.styles.setCurrentText(style)
-        self.on_style_changed(style)
+        if 'system_name' in config:
+            self._strokes = []
+            self._all_keys = ''.join(key.strip('-') for key in system.KEYS)
+            self._numbers = set(system.NUMBERS.values())
+            self.header.setText(self._all_keys)
+            self.on_style_changed(self._style)
 
     @property
     def _style(self):

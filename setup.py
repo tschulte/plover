@@ -367,7 +367,7 @@ extras_require = {
     ':"darwin" in sys_platform': [
         'pyobjc-core==3.1.1+plover2',
         'pyobjc-framework-Cocoa==3.1.1+plover2',
-        'pyobjc-framework-Quartz>=3.0.3',
+        'pyobjc-framework-Quartz==3.1.1',
         'appnope>=0.1.0',
     ],
 }
@@ -431,10 +431,41 @@ if __name__ == '__main__':
         extras_require=extras_require,
         tests_require=tests_require,
         dependency_links=dependency_links,
-        entry_points={
-            'console_scripts': ['plover=plover.main:main'],
-            'setuptools.installation': ['eggsecutable=plover.main:main'],
-        },
+        entry_points='''
+
+        [console_scripts]
+        plover = plover.main:main
+
+        [plover.dictionary]
+        json = plover.dictionary.json_dict
+        rtf = plover.dictionary.rtfcre_dict
+
+        [plover.gui]
+        none = plover.gui_none.main
+        qt   = plover.gui_qt.main
+
+        [plover.gui.qt.tool]
+        add_translation = plover.gui_qt.add_translation:AddTranslation
+        lookup = plover.gui_qt.lookup_dialog:LookupDialog
+        paper_tape = plover.gui_qt.paper_tape:PaperTape
+        suggestions = plover.gui_qt.suggestions_dialog:SuggestionsDialog
+
+        [plover.machine]
+        Gemini PR = plover.machine.geminipr:GeminiPr
+        Keyboard  = plover.machine.keyboard:Keyboard
+        Passport  = plover.machine.passport:Passport
+        ProCAT    = plover.machine.procat:ProCAT
+        Stentura  = plover.machine.stentura:Stentura
+        TX Bolt   = plover.machine.txbolt:TxBolt
+        Treal     = plover.machine.treal:Treal
+
+        [plover.system]
+        English Stenotype = plover.system.english_stenotype
+
+        [setuptools.installation]
+        eggsecutable = plover.main:main
+
+        ''',
         packages=[
             'plover',
             'plover.dictionary',
@@ -448,7 +479,11 @@ if __name__ == '__main__':
             ('share/pixmaps', ['plover/assets/plover.png']),
         ],
         classifiers=[
+            'Programming Language :: Python :: 2',
             'Programming Language :: Python :: 2.7',
+            'Programming Language :: Python :: 3',
+            'Programming Language :: Python :: 3.4',
+            'Programming Language :: Python :: 3.5',
             'License :: OSI Approved :: GNU General Public License v2 or later (GPLv2+)',
             'Development Status :: 5 - Production/Stable',
             'Environment :: X11 Applications',

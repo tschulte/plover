@@ -9,7 +9,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>319</width>
+    <width>329</width>
     <height>427</height>
    </rect>
   </property>
@@ -105,8 +105,8 @@
         <rect>
          <x>0</x>
          <y>0</y>
-         <width>301</width>
-         <height>245</height>
+         <width>311</width>
+         <height>233</height>
         </rect>
        </property>
       </widget>
@@ -151,8 +151,8 @@
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>319</width>
-     <height>19</height>
+     <width>329</width>
+     <height>25</height>
     </rect>
    </property>
    <widget class="QMenu" name="menu_File">
@@ -164,17 +164,13 @@
     <addaction name="separator"/>
     <addaction name="action_Configure"/>
     <addaction name="separator"/>
-    <addaction name="action_ShowHide"/>
+    <addaction name="action_Show"/>
     <addaction name="action_Quit"/>
    </widget>
    <widget class="QMenu" name="menu_Tools">
     <property name="title">
      <string>&amp;Tools</string>
     </property>
-    <addaction name="action_Lookup"/>
-    <addaction name="action_NewTranslation"/>
-    <addaction name="action_PaperTape"/>
-    <addaction name="action_Suggestions"/>
    </widget>
    <widget class="QMenu" name="menu_Help">
     <property name="title">
@@ -192,7 +188,7 @@
    <addaction name="menu_Tools"/>
    <addaction name="menu_Help"/>
   </widget>
-  <widget class="QToolBar" name="toolBar">
+  <widget class="QToolBar" name="toolbar">
    <property name="windowTitle">
     <string>Plover: Toolbar</string>
    </property>
@@ -213,9 +209,6 @@
    </attribute>
    <addaction name="action_Configure"/>
    <addaction name="separator"/>
-   <addaction name="action_Lookup"/>
-   <addaction name="action_Suggestions"/>
-   <addaction name="action_PaperTape"/>
   </widget>
   <action name="action_Quit">
    <property name="text">
@@ -243,66 +236,6 @@
     <string>Ctrl+,</string>
    </property>
   </action>
-  <action name="action_NewTranslation">
-   <property name="icon">
-    <iconset resource="resources/resources.qrc">
-     <normaloff>:/new.svg</normaloff>:/new.svg</iconset>
-   </property>
-   <property name="text">
-    <string>&amp;New translation</string>
-   </property>
-   <property name="toolTip">
-    <string>Open the new translation dialog.</string>
-   </property>
-   <property name="shortcut">
-    <string>Ctrl+N</string>
-   </property>
-  </action>
-  <action name="action_Lookup">
-   <property name="icon">
-    <iconset resource="resources/resources.qrc">
-     <normaloff>:/search.svg</normaloff>:/search.svg</iconset>
-   </property>
-   <property name="text">
-    <string>&amp;Lookup</string>
-   </property>
-   <property name="toolTip">
-    <string>Open the lookup dialog.</string>
-   </property>
-   <property name="shortcut">
-    <string>Ctrl+L</string>
-   </property>
-  </action>
-  <action name="action_PaperTape">
-   <property name="icon">
-    <iconset resource="resources/resources.qrc">
-     <normaloff>:/tape.svg</normaloff>:/tape.svg</iconset>
-   </property>
-   <property name="text">
-    <string>Paper &amp;tape</string>
-   </property>
-   <property name="toolTip">
-    <string>Open the paper tape.</string>
-   </property>
-   <property name="shortcut">
-    <string>Ctrl+T</string>
-   </property>
-  </action>
-  <action name="action_Suggestions">
-   <property name="icon">
-    <iconset resource="resources/resources.qrc">
-     <normaloff>:/suggestions.svg</normaloff>:/suggestions.svg</iconset>
-   </property>
-   <property name="text">
-    <string>&amp;Suggestions</string>
-   </property>
-   <property name="toolTip">
-    <string>Open the suggestions dialog.</string>
-   </property>
-   <property name="shortcut">
-    <string>Ctrl+J</string>
-   </property>
-  </action>
   <action name="action_About">
    <property name="text">
     <string>&amp;About</string>
@@ -326,15 +259,12 @@
     <string>Ctrl+R</string>
    </property>
   </action>
-  <action name="action_ShowHide">
+  <action name="action_Show">
    <property name="text">
-    <string>&amp;Show/Hide</string>
+    <string>&amp;Show</string>
    </property>
    <property name="toolTip">
-    <string>Show/Hide the main window.</string>
-   </property>
-   <property name="shortcut">
-    <string>Ctrl+W</string>
+    <string>Show the main window.</string>
    </property>
   </action>
   <action name="action_ToggleOutput">
@@ -373,22 +303,6 @@
    </hints>
   </connection>
   <connection>
-   <sender>action_NewTranslation</sender>
-   <signal>triggered()</signal>
-   <receiver>MainWindow</receiver>
-   <slot>on_add_translation()</slot>
-   <hints>
-    <hint type="sourcelabel">
-     <x>-1</x>
-     <y>-1</y>
-    </hint>
-    <hint type="destinationlabel">
-     <x>140</x>
-     <y>57</y>
-    </hint>
-   </hints>
-  </connection>
-  <connection>
    <sender>action_Configure</sender>
    <signal>triggered()</signal>
    <receiver>MainWindow</receiver>
@@ -405,58 +319,10 @@
    </hints>
   </connection>
   <connection>
-   <sender>action_ShowHide</sender>
+   <sender>action_Show</sender>
    <signal>triggered()</signal>
    <receiver>MainWindow</receiver>
-   <slot>on_show_hide()</slot>
-   <hints>
-    <hint type="sourcelabel">
-     <x>-1</x>
-     <y>-1</y>
-    </hint>
-    <hint type="destinationlabel">
-     <x>124</x>
-     <y>46</y>
-    </hint>
-   </hints>
-  </connection>
-  <connection>
-   <sender>action_PaperTape</sender>
-   <signal>triggered()</signal>
-   <receiver>MainWindow</receiver>
-   <slot>on_paper_tape()</slot>
-   <hints>
-    <hint type="sourcelabel">
-     <x>-1</x>
-     <y>-1</y>
-    </hint>
-    <hint type="destinationlabel">
-     <x>124</x>
-     <y>46</y>
-    </hint>
-   </hints>
-  </connection>
-  <connection>
-   <sender>action_Suggestions</sender>
-   <signal>triggered()</signal>
-   <receiver>MainWindow</receiver>
-   <slot>on_suggestions()</slot>
-   <hints>
-    <hint type="sourcelabel">
-     <x>-1</x>
-     <y>-1</y>
-    </hint>
-    <hint type="destinationlabel">
-     <x>124</x>
-     <y>46</y>
-    </hint>
-   </hints>
-  </connection>
-  <connection>
-   <sender>action_Lookup</sender>
-   <signal>triggered()</signal>
-   <receiver>MainWindow</receiver>
-   <slot>on_lookup()</slot>
+   <slot>on_show()</slot>
    <hints>
     <hint type="sourcelabel">
      <x>-1</x>
@@ -567,12 +433,8 @@
  </connections>
  <slots>
   <slot>on_reconnect()</slot>
-  <slot>on_add_translation()</slot>
   <slot>on_configure()</slot>
   <slot>on_manage_dictionaries()</slot>
-  <slot>on_lookup()</slot>
-  <slot>on_paper_tape()</slot>
-  <slot>on_suggestions()</slot>
   <slot>on_quit()</slot>
   <slot>on_toggle_output(bool)</slot>
   <slot>on_about()</slot>

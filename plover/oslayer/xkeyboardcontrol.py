@@ -21,6 +21,7 @@ http://tronche.com/gui/x/xlib/input/keyboard-encoding.html
 
 """
 
+import errno
 import os
 import string
 import select
@@ -171,8 +172,11 @@ class KeyboardCapture(threading.Thread):
         # Find all keyboard devices.
         keyboard_devices = []
         for devinfo in self.display.xinput_query_device(xinput.AllDevices).devices:
-            # Only keep slave keyboard devices.
-            if devinfo.use != xinput.SlaveKeyboard:
+            # Only keep slave devices.
+            # Note: we look at pointer devices too, as some keyboards (like the
+            # VicTop mechanical gaming keyboard) register 2 devices, including
+            # a pointer device with a key class (to fully support NKRO).
+            if devinfo.use not in (xinput.SlaveKeyboard, xinput.SlavePointer):
                 continue
             # Ignore XTest keyboard device.
             if 'Virtual core XTEST keyboard' == devinfo.name:
@@ -180,7 +184,11 @@ class KeyboardCapture(threading.Thread):
             # Ignore disabled devices.
             if not devinfo.enabled:
                 continue
-            keyboard_devices.append(devinfo.deviceid)
+            # Check for the presence of a key class.
+            for c in devinfo.classes:
+                if c.type == xinput.KeyClass:
+                    keyboard_devices.append(devinfo.deviceid)
+                    break
         if XINPUT_DEVICE_ID == xinput.AllDevices:
             self.devices = keyboard_devices
         else:
@@ -195,9 +203,18 @@ class KeyboardCapture(threading.Thread):
         display_fileno = self.display.fileno()
         while True:
             if not self.display.pending_events():
-                rlist, wlist, xlist = select.select((self.pipe[0],
-                                                     display_fileno),
-                                                    (), ())
+                try:
+                    rlist, wlist, xlist = select.select((self.pipe[0],
+                                                         display_fileno),
+                                                        (), ())
+                except select.error as err:
+                    if isinstance(err, OSError):
+                        code = err.errno
+                    else:
+                        code = err[0]
+                    if code != errno.EINTR:
+                        raise
+                    continue
                 assert not wlist
                 assert not xlist
                 if self.pipe[0] in rlist:

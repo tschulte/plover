@@ -263,6 +263,66 @@ class KeymapOption(QTableWidget):
         action = self.item(row, 0).data(Qt.DisplayRole)
         keys = self.item(row, 1).data(Qt.DisplayRole)
         self._value[action] = keys.split()
+        new_keys = self._value[action]
+        if new_keys != keys:
+            self._updating = True
+            self.item(row, 1).setData(Qt.DisplayRole, ' '.join(sorted(new_keys)))
+            self._updating = False
+        self.valueChanged.emit(self._value)
+
+
+class MultipleChoicesOption(QTableWidget):
+
+    valueChanged = pyqtSignal(QVariant)
+
+    def __init__(self, choices=None, labels=(_('Choice'), _('Selected'))):
+        super(MultipleChoicesOption, self).__init__()
+        self._value = {}
+        self._updating = False
+        self._choices = {} if choices is None else choices
+        self._reversed_choices = {
+            translation: choice
+            for choice, translation in choices.items()
+        }
+        self.setColumnCount(2)
+        self.setHorizontalHeaderLabels(labels)
+        self.horizontalHeader().setStretchLastSection(True)
+        self.verticalHeader().hide()
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.cellChanged.connect(self._on_cell_changed)
+
+    def setValue(self, value):
+        self._updating = True
+        self.resizeColumnsToContents()
+        self.setMinimumSize(self.viewportSizeHint())
+        self.setRowCount(0)
+        if value is None:
+            value = set()
+        self._value = value
+        row = -1
+        for choice in sorted(self._reversed_choices):
+            row += 1
+            self.insertRow(row)
+            item = QTableWidgetItem(self._choices[choice])
+            item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+            self.setItem(row, 0, item)
+            item = QTableWidgetItem()
+            item.setFlags((item.flags() & ~Qt.ItemIsEditable) | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked if choice in value else Qt.Unchecked)
+            self.setItem(row, 1, item)
+        self.resizeColumnsToContents()
+        self.setMinimumSize(self.viewportSizeHint())
+        self._updating = False
+
+    def _on_cell_changed(self, row, column):
+        if self._updating:
+            return
+        assert (row, column) == (0, 1)
+        choice = self._reversed_choices[self.item(row, 0).data(Qt.DisplayRole)]
+        if self.item(row, 1).checkState():
+            self._value.add(choice)
+        else:
+            self._value.discard(choice)
         self.valueChanged.emit(self._value)
 
 
@@ -293,7 +353,7 @@ class ConfigWindow(QDialog, Ui_ConfigWindow, WindowState):
         }
         machines = {
             machine: _(machine)
-            for machine in engine.machines
+            for machine in engine.list_plugins('machine')
         }
         mappings = (
             (_('Interface'), (
@@ -321,11 +381,11 @@ class ConfigWindow(QDialog, Ui_ConfigWindow, WindowState):
                              _('Save translations to the logfile.')),
             )),
             (_('Machine'), (
-                ConfigOption(_('Type:'), 'machine_type', partial(ChoiceOption, choices=machines),
+                ConfigOption(_('Machine:'), 'machine_type', partial(ChoiceOption, choices=machines),
                              dependents=(
-                                   ('machine_specific_options', engine.machine_specific_options),
-                                   ('system_keymap', engine.system_keymap),
-                               )),
+                                 ('machine_specific_options', engine.machine_specific_options),
+                                 ('system_keymap', lambda v: self._update_keymap(machine_type=v)),
+                             )),
                 ConfigOption(_('Options:'), 'machine_specific_options',
                              lambda *args: machine_options.get(self._config['machine_type'],
                                                                SerialOption)(*args)),
@@ -354,7 +414,25 @@ class ConfigWindow(QDialog, Ui_ConfigWindow, WindowState):
                                '\n'
                                'Note: the effective value will take into account the\n'
                                'dictionaries entry with the maximum number of strokes.')),
-            ))
+            )),
+            (_('Plugins'), (
+                ConfigOption(_('Extension:'), 'enabled_extensions',
+                             partial(MultipleChoicesOption, choices={
+                                 name: name
+                                 for name in engine.list_plugins('extension')
+                             }, labels=(_('Name'), _('Enabled'))),
+                             _('Configure enabled plugin extensions.')),
+            )),
+            (_('System'), (
+                ConfigOption(_('System:'), 'system_name',
+                             partial(ChoiceOption, choices={
+                                 name: name
+                                 for name in engine.list_plugins('system')
+                             }),
+                             dependents=(
+                                 ('system_keymap', lambda v: self._update_keymap(system_name=v)),
+                             )),
+            )),
         )
         # Only keep supported options, to avoid messing with things like
         # dictionaries, that are handled by another (possibly concurrent)
@@ -397,6 +475,15 @@ class ConfigWindow(QDialog, Ui_ConfigWindow, WindowState):
         buttons.button(QDialogButtonBox.Apply).clicked.connect(self.on_apply)
         self.restore_state()
         self.finished.connect(self.save_state)
+
+    def _update_keymap(self, machine_type=None, system_name=None):
+        if machine_type is None:
+            machine_type = self._config['machine_type']
+        if system_name is None:
+            system_name = self._config['system_name']
+        keymap = self._engine.system_keymap(machine_type=machine_type,
+                                            system_name=system_name)
+        return keymap
 
     def _create_option_widget(self, option):
         widget = option.widget_class()
